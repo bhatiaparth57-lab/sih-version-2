@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { PROJECTS, VENDORS, type VerifyStatus } from './data';
+import { PROJECTS, VENDORS, type VerifyStatus, type Risk } from './data';
+import { SYNTHETIC_DEMO_VENDORS } from './vendorDemoData';
+import type { VendorRecord } from './vendorTypes';
 
 // ==========================================
 // 1. PROJECTS — DB row type (confirmed schema)
@@ -202,61 +204,110 @@ export function useLiveProjects() {
 
 
 // ==========================================
-// 2. VENDORS CONNECTION
+// 2. VENDORS CONNECTION & DEMO FALLBACK
 // ==========================================
-export function useLiveVendors() {
-  const [vendors, setVendors] = useState<any[]>([]);
+
+export interface UseLiveVendorsResult {
+  vendors: VendorRecord[];
+  loading: boolean;
+  error: string | null;
+  isLive: boolean;
+}
+
+/**
+ * Resolves database query output into typed VendorRecord array and isLive status.
+ * Pure function separated for deterministic unit testing.
+ * - isLive is true ONLY when dbData has at least 1 actual row.
+ * - In all other cases (unconfigured, error, empty table), falls back to complete
+ *   SYNTHETIC_DEMO_VENDORS with tokens and attributes preserved.
+ */
+export function resolveLiveVendors(
+  dbData: any[] | null | undefined,
+  dbError: { message: string } | null | undefined,
+  isConfigured: boolean,
+): { vendors: VendorRecord[]; isLive: boolean; error: string | null } {
+  if (!isConfigured) {
+    return { vendors: SYNTHETIC_DEMO_VENDORS, isLive: false, error: null };
+  }
+
+  if (dbError) {
+    return { vendors: SYNTHETIC_DEMO_VENDORS, isLive: false, error: dbError.message };
+  }
+
+  if (!dbData || dbData.length === 0) {
+    return { vendors: SYNTHETIC_DEMO_VENDORS, isLive: false, error: null };
+  }
+
+  // Live Supabase records: Map database columns without attaching simulated relationship tokens
+  const liveVendors: VendorRecord[] = dbData.map((v) => ({
+    id: String(v.id || `v-${v.name}`),
+    name: String(v.name || 'Unknown Vendor'),
+    pan: v.pan ? String(v.pan) : undefined,
+    gstin: v.gstin ? String(v.gstin) : undefined,
+    projectsCount: Number(v.projects_count ?? v.projectsCount ?? v.projects ?? 0),
+    totalValueCrore: Number(v.total_value ?? v.totalValueCrore ?? v.total ?? 0),
+    risk: (v.risk_level || v.risk || 'LOW') as Risk,
+    riskScore: Number(v.risk_score ?? v.riskScore ?? 0),
+    concentration: Number(v.concentration ?? 0),
+    alerts: Number(v.alerts ?? 0),
+    districtsCount: Number(v.districts_count ?? v.districtsCount ?? v.districts ?? 0),
+    highRisk: Number(v.high_risk ?? v.highRisk ?? 0),
+    established: v.established ? String(v.established) : undefined,
+    relation: v.relation ? String(v.relation) : undefined,
+    demoPanToken: undefined,
+    demoPhysicalAddress: undefined,
+    demoDirectorNames: undefined,
+    demoContactDomain: undefined,
+    demoBankTokenHash: undefined,
+  }));
+
+  return { vendors: liveVendors, isLive: true, error: null };
+}
+
+export function useLiveVendors(): UseLiveVendorsResult {
+  const [vendors, setVendors] = useState<VendorRecord[]>(SYNTHETIC_DEMO_VENDORS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isLive, setIsLive] = useState(false);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
-      const fallbackVendors = (VENDORS || []).map((v, i) => ({
-        id: `v-${i}`,
-        name: v.name,
-        pan: v.pan,
-        gstin: v.gstin,
-        projects_count: v.projects,
-        total_value: v.total,
-        risk_score: v.riskScore,
-        concentration: v.concentration,
-        districts_count: v.districts,
-        alerts: v.alerts,
-      }));
-      setVendors(fallbackVendors);
+      const resolved = resolveLiveVendors(null, null, false);
+      setVendors(resolved.vendors);
+      setIsLive(resolved.isLive);
+      setError(resolved.error);
       setLoading(false);
       return;
     }
 
     async function fetchVendors() {
       setLoading(true);
-      const { data, error } = await supabase.from('vendors').select('*');
-
-      if (error || !data || data.length === 0) {
-        console.warn("Database fetch error (vendors), using demo fallback:", error);
-        const fallbackVendors = (VENDORS || []).map((v, i) => ({
-          id: `v-${i}`,
-          name: v.name,
-          pan: v.pan,
-          gstin: v.gstin,
-          projects_count: v.projects,
-          total_value: v.total,
-          risk_score: v.riskScore,
-          concentration: v.concentration,
-          districts_count: v.districts,
-          alerts: v.alerts,
-        }));
-        setVendors(fallbackVendors);
-        if (error) setError(error.message);
-      } else {
-        setVendors(data);
+      try {
+        const { data, error: fetchError } = await supabase.from('vendors').select('*');
+        const resolved = resolveLiveVendors(data, fetchError, true);
+        if (fetchError || !data || data.length === 0) {
+          console.warn('[useLiveVendors] Supabase fetch failed or empty, using demo fallback:', fetchError?.message);
+        }
+        setVendors(resolved.vendors);
+        setIsLive(resolved.isLive);
+        setError(resolved.error);
+      } catch (err: unknown) {
+        const resolved = resolveLiveVendors(
+          null,
+          { message: err instanceof Error ? err.message : 'Unknown network error' },
+          true,
+        );
+        setVendors(resolved.vendors);
+        setIsLive(resolved.isLive);
+        setError(resolved.error);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     fetchVendors();
   }, []);
 
-  return { vendors, loading, error };
+  return { vendors, loading, error, isLive };
 }
 
 // ==========================================

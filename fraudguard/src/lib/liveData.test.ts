@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Unit tests for mapDbProjectToFrontend and the demo fallback normalization.
  * These tests are pure (no network, no React) and cover:
  *   1. Normal DB row mapping
@@ -13,7 +13,8 @@
  *  10. Advisory fields (risk_score, finding) are included but not renamed misleadingly
  */
 import { describe, it, expect } from 'vitest';
-import { mapDbProjectToFrontend, type DbProjectRow } from './liveData';
+import { mapDbProjectToFrontend, resolveLiveVendors, type DbProjectRow } from './liveData';
+import { SYNTHETIC_DEMO_VENDORS } from './vendorDemoData';
 
 function makeRow(overrides: Partial<DbProjectRow> = {}): DbProjectRow {
   return {
@@ -161,3 +162,68 @@ describe('mapDbProjectToFrontend', () => {
     expect(mapDbProjectToFrontend(makeRow({ verify_status: '' })).verify).toBe('Pending');
   });
 });
+
+describe('resolveLiveVendors — Layer 3 Vendor Fallback & Live State', () => {
+  it('returns complete synthetic demo vendors with relationship tokens when not configured', () => {
+    const result = resolveLiveVendors(null, null, false);
+    expect(result.isLive).toBe(false);
+    expect(result.error).toBeNull();
+    expect(result.vendors).toHaveLength(SYNTHETIC_DEMO_VENDORS.length);
+
+    // Verify vendor IDs and synthetic relationship tokens are preserved
+    const abc = result.vendors.find((v) => v.id === 'v-abc');
+    expect(abc).toBeDefined();
+    expect(abc?.demoPanToken).toBe('DEMO-PAN-ABC-0142');
+    expect(abc?.demoBankTokenHash).toBe('BANK-TOKEN-DEMO-0142-ALPHA');
+    expect(abc?.demoDirectorNames).toBeDefined();
+    expect(abc?.demoPhysicalAddress).toBeDefined();
+  });
+
+  it('returns isLive = false when Supabase query returns an empty table (0 rows)', () => {
+    const result = resolveLiveVendors([], null, true);
+    expect(result.isLive).toBe(false);
+    expect(result.error).toBeNull();
+    expect(result.vendors).toHaveLength(SYNTHETIC_DEMO_VENDORS.length);
+    expect(result.vendors[0].id).toBe('v-abc');
+    expect(result.vendors[0].demoPanToken).toBeDefined();
+  });
+
+  it('returns isLive = false and records error message when Supabase query fails', () => {
+    const result = resolveLiveVendors(null, { message: 'relation "public.vendors" does not exist' }, true);
+    expect(result.isLive).toBe(false);
+    expect(result.error).toBe('relation "public.vendors" does not exist');
+    expect(result.vendors).toHaveLength(SYNTHETIC_DEMO_VENDORS.length);
+    expect(result.vendors[0].id).toBe('v-abc');
+  });
+
+  it('returns isLive = true and maps real vendor rows when Supabase returns data', () => {
+    const mockDbRow = {
+      id: 'ven-real-001',
+      name: 'Actual Infrastructure Ltd',
+      pan: 'ABCDE1234F',
+      gstin: '27ABCDE1234F1Z5',
+      projects_count: 5,
+      total_value: 12.5,
+      risk_score: 45,
+      risk_level: 'MEDIUM',
+      concentration: 30,
+      alerts: 1,
+      districts_count: 2,
+      high_risk: 0,
+      established: '2019',
+    };
+
+    const result = resolveLiveVendors([mockDbRow], null, true);
+    expect(result.isLive).toBe(true);
+    expect(result.error).toBeNull();
+    expect(result.vendors).toHaveLength(1);
+    expect(result.vendors[0].id).toBe('ven-real-001');
+    expect(result.vendors[0].name).toBe('Actual Infrastructure Ltd');
+    expect(result.vendors[0].projectsCount).toBe(5);
+    expect(result.vendors[0].totalValueCrore).toBe(12.5);
+    // Real vendors must NOT have simulated relationship tokens attached
+    expect(result.vendors[0].demoPanToken).toBeUndefined();
+    expect(result.vendors[0].demoBankTokenHash).toBeUndefined();
+  });
+});
+

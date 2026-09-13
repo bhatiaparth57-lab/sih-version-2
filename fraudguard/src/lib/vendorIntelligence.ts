@@ -25,6 +25,7 @@ import type {
   VendorFinding,
   VendorIntelligenceProfile,
   VendorIntelligenceResult,
+  VendorIntelligenceSummary,
   VendorRecord,
   VendorRelationship,
 } from '@/lib/vendorTypes';
@@ -734,6 +735,28 @@ export function runVendorIntelligenceAnalysis(input: VendorIntelligenceInput): V
     allFindingsList.push(...p.findings);
   }
 
+  // Compute unified analysis summary as single source of truth
+  const profileList = Object.values(profiles);
+  const criticalRiskCount = profileList.filter((p) => p.riskLevel === 'CRITICAL').length;
+  const highRiskCount = profileList.filter((p) => p.riskLevel === 'HIGH').length;
+  const mediumRiskCount = profileList.filter((p) => p.riskLevel === 'MEDIUM').length;
+  const lowRiskCount = profileList.filter((p) => p.riskLevel === 'LOW').length;
+  const flaggedVendorsCount = profileList.filter((p) => p.findings.length > 0).length;
+  const totalIndicatorsCount = allFindingsList.length;
+
+  const summary: VendorIntelligenceSummary = {
+    vendorsAnalyzed: vendors.length,
+    flaggedTiesCount: allRelationships.length,
+    identifiedClustersCount: clusters.length,
+    highCriticalRiskCount: criticalRiskCount + highRiskCount,
+    criticalRiskCount,
+    highRiskCount,
+    mediumRiskCount,
+    lowRiskCount,
+    flaggedVendorsCount,
+    totalIndicatorsCount,
+  };
+
   return {
     engine: 'rule-based',
     analyzedAt: new Date().toISOString(),
@@ -742,6 +765,7 @@ export function runVendorIntelligenceAnalysis(input: VendorIntelligenceInput): V
     allRelationships,
     allFindings: allFindingsList,
     clusters,
+    summary,
   };
 }
 

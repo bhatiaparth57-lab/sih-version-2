@@ -357,4 +357,124 @@ describe('Layer 3: Vendor Intelligence & Collusion Detection Engine', () => {
     expect(abc.riskLevel).toBe('CRITICAL');
     expect(abc.findings.length).toBeGreaterThan(0);
   });
+
+  it('computes unified summary counts that strictly match vendor profile findings', () => {
+    const result = runVendorIntelligenceAnalysis({
+      vendors: SYNTHETIC_DEMO_VENDORS,
+      projects: getDemoProjects(),
+      invoices: SYNTHETIC_DEMO_INVOICES,
+    });
+
+    const profiles = Object.values(result.profiles);
+    const summary = result.summary;
+
+    expect(summary.vendorsAnalyzed).toBe(SYNTHETIC_DEMO_VENDORS.length);
+    expect(summary.flaggedTiesCount).toBe(result.allRelationships.length);
+    expect(summary.identifiedClustersCount).toBe(result.clusters.length);
+
+    // Profile risk level sums match summary
+    const crit = profiles.filter((p) => p.riskLevel === 'CRITICAL').length;
+    const high = profiles.filter((p) => p.riskLevel === 'HIGH').length;
+    const med = profiles.filter((p) => p.riskLevel === 'MEDIUM').length;
+    const low = profiles.filter((p) => p.riskLevel === 'LOW').length;
+
+    expect(summary.criticalRiskCount).toBe(crit);
+    expect(summary.highRiskCount).toBe(high);
+    expect(summary.mediumRiskCount).toBe(med);
+    expect(summary.lowRiskCount).toBe(low);
+    expect(summary.highCriticalRiskCount).toBe(crit + high);
+    expect(crit + high + med + low).toBe(summary.vendorsAnalyzed);
+
+    // Flagged vendors and total indicators match profiles
+    const flaggedVendors = profiles.filter((p) => p.findings.length > 0).length;
+    const totalFindings = profiles.reduce((acc, p) => acc + p.findings.length, 0);
+
+    expect(summary.flaggedVendorsCount).toBe(flaggedVendors);
+    expect(summary.totalIndicatorsCount).toBe(totalFindings);
+    expect(summary.totalIndicatorsCount).toBe(result.allFindings.length);
+  });
+
+  it('separates individual findings from pairwise ties: a vendor with 1 finding does not disappear with 0 ties', () => {
+    // Single vendor with 2 high-risk projects (Rule 2 triggers, generating 1 finding and 20 points, but 0 pairwise ties)
+    const soloVendor = makeVendor('v-solo', 'Solo High Risk Contractor Ltd', {
+      demoPanToken: undefined,
+      demoPhysicalAddress: undefined,
+      demoDirectorNames: undefined,
+      demoContactDomain: undefined,
+      demoBankTokenHash: undefined,
+    });
+
+    const p1: Project = { ...normalProject, id: 'P1', vendor: 'Solo High Risk Contractor Ltd', risk: 'CRITICAL', riskScore: 85 };
+    const p2: Project = { ...normalProject, id: 'P2', vendor: 'Solo High Risk Contractor Ltd', risk: 'HIGH', riskScore: 75 };
+
+    const result = runVendorIntelligenceAnalysis({
+      vendors: [soloVendor],
+      projects: [p1, p2],
+      invoices: [],
+    });
+
+    // Pairwise relationships must be exactly 0
+    expect(result.allRelationships).toHaveLength(0);
+    expect(result.clusters).toHaveLength(0);
+    expect(result.summary.flaggedTiesCount).toBe(0);
+    expect(result.summary.identifiedClustersCount).toBe(0);
+
+    // Vendor finding MUST be recorded in the summary and profile
+    expect(result.summary.flaggedVendorsCount).toBe(1);
+    expect(result.summary.totalIndicatorsCount).toBe(1);
+    expect(result.profiles['v-solo'].findings).toHaveLength(1);
+    expect(result.profiles['v-solo'].findings[0].ruleName).toBe('high_risk_project_concentration');
+    expect(result.profiles['v-solo'].riskScore).toBe(20);
+    expect(result.profiles['v-solo'].riskLevel).toBe('LOW');
+  });
+
+  it('guarantees no duplicate relationships or vendor profiles', () => {
+    const result = runVendorIntelligenceAnalysis({
+      vendors: SYNTHETIC_DEMO_VENDORS,
+      projects: getDemoProjects(),
+      invoices: SYNTHETIC_DEMO_INVOICES,
+    });
+
+    // Check no duplicate vendor profile IDs
+    const profileKeys = Object.keys(result.profiles);
+    const uniqueKeys = new Set(profileKeys);
+    expect(profileKeys.length).toBe(uniqueKeys.size);
+
+    // Check no duplicate relationship pairs for the same type
+    const relSignatures = new Set<string>();
+    for (const rel of result.allRelationships) {
+      const pair = [rel.sourceVendorId, rel.targetVendorId].sort().join('<->');
+      const sig = `${pair}::${rel.relationshipType}`;
+      expect(relSignatures.has(sig)).toBe(false);
+      relSignatures.add(sig);
+    }
+  });
+
+  it('verifies filters do not alter the underlying global analysis summary', () => {
+    const result = runVendorIntelligenceAnalysis({
+      vendors: SYNTHETIC_DEMO_VENDORS,
+      projects: getDemoProjects(),
+      invoices: SYNTHETIC_DEMO_INVOICES,
+    });
+
+    const baselineSummary = { ...result.summary };
+
+    // Simulate UI directory filter: query "Sharma"
+    const query = 'Sharma';
+    const filtered = SYNTHETIC_DEMO_VENDORS.filter((v) =>
+      v.name.toLowerCase().includes(query.toLowerCase()),
+    );
+    expect(filtered.length).toBe(1);
+
+    // Filter by risk: "CRITICAL"
+    const criticalOnly = SYNTHETIC_DEMO_VENDORS.filter(
+      (v) => result.profiles[v.id]?.riskLevel === 'CRITICAL',
+    );
+    expect(criticalOnly.length).toBeGreaterThanOrEqual(1);
+
+    // Global summary must remain completely unchanged
+    expect(result.summary).toEqual(baselineSummary);
+    expect(result.summary.vendorsAnalyzed).toBe(SYNTHETIC_DEMO_VENDORS.length);
+  });
 });
+

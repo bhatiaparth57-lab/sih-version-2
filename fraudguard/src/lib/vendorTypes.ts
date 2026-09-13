@@ -93,6 +93,19 @@ export interface CollusionCluster {
   evidenceCount: number;
 }
 
+export interface VendorIntelligenceSummary {
+  vendorsAnalyzed: number;
+  flaggedTiesCount: number;         // Pairwise relationship ties between distinct vendors
+  identifiedClustersCount: number;  // Connected collusion rings
+  highCriticalRiskCount: number;    // Vendors categorized with HIGH or CRITICAL risk
+  criticalRiskCount: number;
+  highRiskCount: number;
+  mediumRiskCount: number;
+  lowRiskCount: number;
+  flaggedVendorsCount: number;      // Vendors with at least one finding/indicator
+  totalIndicatorsCount: number;     // Total findings across all vendors
+}
+
 export interface VendorIntelligenceResult {
   engine: 'rule-based';
   analyzedAt: string;
@@ -101,6 +114,7 @@ export interface VendorIntelligenceResult {
   allRelationships: VendorRelationship[];
   allFindings: VendorFinding[];
   clusters: CollusionCluster[];
+  summary: VendorIntelligenceSummary;
 }
 
 export interface GraphNode {

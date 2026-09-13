@@ -16,10 +16,9 @@ import VendorIntelligencePanel from '@/components/VendorIntelligencePanel';
 import RiskBadge from '@/components/ui/RiskBadge';
 import { cn } from '@/lib/utils';
 
-import { isSupabaseConfigured } from '@/lib/supabaseClient';
 
 export default function Vendors() {
-  const { vendors: liveVendors, loading, error } = useLiveVendors();
+  const { vendors: liveVendors, loading, error, isLive } = useLiveVendors();
 
   const [activeTab, setActiveTab] = useState<'network' | 'directory'>('network');
   const [searchQuery, setSearchQuery] = useState('');
@@ -27,67 +26,14 @@ export default function Vendors() {
   const [selectedVendorId, setSelectedVendorId] = useState<string>('v-abc');
   const [selectedRelationship, setSelectedRelationship] = useState<VendorRelationship | null>(null);
 
-  // Normalize Vendors: In demo mode, load synthetic tokens for demonstration.
-  // When connected to live Supabase, real fields are preserved and synthetic tokens are NOT attributed as verified real-world facts.
+  // Normalize Vendors:
+  // - In live mode (isLive === true), live Supabase records are used without synthetic tokens.
+  // - In demo / fallback mode (isLive === false), complete synthetic demo records are preserved
+  //   with all relationship tokens and demo attributes intact.
   const normalizedVendors: VendorRecord[] = useMemo(() => {
-    // If live database is connected, check whether to attach demo overlay or use strictly real columns
-    if (isSupabaseConfigured && liveVendors && liveVendors.length > 0) {
-      return liveVendors.map((v) => ({
-        id: String(v.id || `v-${v.name}`),
-        name: String(v.name || 'Unknown Vendor'),
-        pan: v.pan ? String(v.pan) : undefined,
-        gstin: v.gstin ? String(v.gstin) : undefined,
-        projectsCount: Number(v.projects_count ?? v.projects ?? 0),
-        totalValueCrore: Number(v.total_value ?? v.total ?? 0),
-        risk: (v.risk_level || v.risk || 'LOW') as Risk,
-        riskScore: Number(v.risk_score ?? v.riskScore ?? 0),
-        concentration: Number(v.concentration ?? 0),
-        alerts: Number(v.alerts ?? 0),
-        districtsCount: Number(v.districts_count ?? v.districts ?? 0),
-        highRisk: Number(v.high_risk ?? v.highRisk ?? 0),
-        established: v.established ? String(v.established) : undefined,
-        relation: v.relation ? String(v.relation) : undefined,
-        // Live database records do not have synthetic demo tokens attributed to them
-        demoPanToken: undefined,
-        demoPhysicalAddress: undefined,
-        demoDirectorNames: undefined,
-        demoContactDomain: undefined,
-        demoBankTokenHash: undefined,
-      }));
-    }
-
-    // Demo / fallback mode: Use separated synthetic demo dataset with demo-only tokens
     if (liveVendors && liveVendors.length > 0) {
-      return liveVendors.map((v) => {
-        const demoMatch = SYNTHETIC_DEMO_VENDORS.find(
-          (d) => d.name.toLowerCase() === (v.name || '').toLowerCase() || (v.pan && d.pan === v.pan),
-        );
-
-        const record: VendorRecord = {
-          id: String(v.id || demoMatch?.id || `v-${v.name}`),
-          name: String(v.name || 'Unknown Vendor'),
-          pan: v.pan ? String(v.pan) : demoMatch?.pan,
-          gstin: v.gstin ? String(v.gstin) : demoMatch?.gstin,
-          projectsCount: Number(v.projects_count ?? v.projects ?? demoMatch?.projectsCount ?? 0),
-          totalValueCrore: Number(v.total_value ?? v.total ?? demoMatch?.totalValueCrore ?? 0),
-          risk: (v.risk_level || v.risk || demoMatch?.risk || 'LOW') as Risk,
-          riskScore: Number(v.risk_score ?? v.riskScore ?? demoMatch?.riskScore ?? 0),
-          concentration: Number(v.concentration ?? demoMatch?.concentration ?? 0),
-          alerts: Number(v.alerts ?? demoMatch?.alerts ?? 0),
-          districtsCount: Number(v.districts_count ?? v.districts ?? demoMatch?.districtsCount ?? 0),
-          highRisk: Number(v.high_risk ?? v.highRisk ?? demoMatch?.highRisk ?? 0),
-          established: v.established ? String(v.established) : demoMatch?.established,
-          relation: v.relation ? String(v.relation) : demoMatch?.relation,
-          demoPanToken: demoMatch?.demoPanToken,
-          demoPhysicalAddress: demoMatch?.demoPhysicalAddress,
-          demoDirectorNames: demoMatch?.demoDirectorNames,
-          demoContactDomain: demoMatch?.demoContactDomain,
-          demoBankTokenHash: demoMatch?.demoBankTokenHash,
-        };
-        return record;
-      });
+      return liveVendors;
     }
-
     return SYNTHETIC_DEMO_VENDORS;
   }, [liveVendors]);
 
@@ -118,12 +64,8 @@ export default function Vendors() {
 
   const selectedProfile = analysis.profiles[selectedVendorId] || analysis.profiles[normalizedVendors[0]?.id];
 
-  // Executive summary counts
-  const totalAnalyzed = analysis.vendorsAnalyzed;
-  const criticalCount = Object.values(analysis.profiles).filter((p) => p.riskLevel === 'CRITICAL').length;
-  const highCount = Object.values(analysis.profiles).filter((p) => p.riskLevel === 'HIGH').length;
-  const relationshipCount = analysis.allRelationships.length;
-  const clusterCount = analysis.clusters.length;
+  // Executive summary counts consumed directly from unified analysis.summary
+  const summary = analysis.summary;
 
   return (
     <div className="p-5 space-y-5">
@@ -161,12 +103,12 @@ export default function Vendors() {
         </div>
       </div>
 
-      {/* Synthetic Demo Notice Banner */}
+      {/* Source Notice Banner: Strictly based on actual data source, not merely credential presence */}
       <div className="rounded-xl border border-[#f0b64b]/30 bg-[#f0b64b]/[0.06] px-4 py-2.5 text-[12px] text-[#f0b64b] flex flex-wrap items-center justify-between gap-2">
         <span>
-          {isSupabaseConfigured
-            ? 'LIVE DATABASE CONNECTED — Showing registered vendors. Any simulated relationship attributes are synthetic demonstration overlays and are never presented as verified real-world facts.'
-            : 'DEMO ENVIRONMENT — All PANs, addresses, director names, email domains, and banking token hashes are synthetic demonstration data. Real government/tax records are not processed.'}
+          {isLive
+            ? 'LIVE DATABASE CONNECTED — Showing registered vendor records loaded from Supabase. Any simulated relationship attributes are synthetic demonstration overlays and are never presented as verified real-world facts.'
+            : 'DEMO ENVIRONMENT (FALLBACK) — Live vendor records unavailable; displaying synthetic demonstration vendors and relationship attributes. All PAN tokens, addresses, director names, email domains, and banking hashes are synthetic demo data.'}
         </span>
         <span className="chip !py-0.5 text-[10px] text-[#f0b64b] border-[#f0b64b]/30">
           DETERMINISTIC RULE ENGINE
@@ -174,41 +116,49 @@ export default function Vendors() {
       </div>
 
       {loading && <p className="text-[12px] text-mute">Loading vendor profiles and computing relationship graph...</p>}
-      {error && <p className="text-[12px] text-danger">Database warning: {error} (Falling back to synthetic demo data)</p>}
+      {error && <p className="text-[12px] text-danger">Database notice: {error} (Operating in synthetic demo fallback mode)</p>}
 
-      {/* Executive Metric Cards */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      {/* Executive Metric Cards: Single source of truth from analysis.summary */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <div className="card p-3.5">
           <div className="text-[10px] font-bold uppercase tracking-wider text-faint">Entities Analyzed</div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="font-mono text-xl font-bold text-ink">{totalAnalyzed}</span>
+            <span className="font-mono text-xl font-bold text-ink">{summary.vendorsAnalyzed}</span>
             <span className="text-[11px] text-mute">contractors</span>
+          </div>
+        </div>
+
+        <div className="card p-3.5">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-faint">Flagged Entities</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="font-mono text-xl font-bold text-[#ff8a3d]">{summary.flaggedVendorsCount}</span>
+            <span className="text-[11px] text-mute">({summary.totalIndicatorsCount} indicators)</span>
           </div>
         </div>
 
         <div className="card p-3.5">
           <div className="text-[10px] font-bold uppercase tracking-wider text-faint">Flagged Collusion Ties</div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="font-mono text-xl font-bold text-[#ff5860]">{relationshipCount}</span>
-            <span className="text-[11px] text-mute">suspicious relationships</span>
+            <span className="font-mono text-xl font-bold text-[#ff5860]">{summary.flaggedTiesCount}</span>
+            <span className="text-[11px] text-mute">pairwise links</span>
           </div>
         </div>
 
         <div className="card p-3.5">
           <div className="text-[10px] font-bold uppercase tracking-wider text-faint">Identified Clusters</div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="font-mono text-xl font-bold text-[#ff8a3d]">{clusterCount}</span>
+            <span className="font-mono text-xl font-bold text-[#ff8a3d]">{summary.identifiedClustersCount}</span>
             <span className="text-[11px] text-mute">interlinked rings</span>
           </div>
         </div>
 
-        <div className="card p-3.5">
+        <div className="card p-3.5 col-span-2 sm:col-span-1">
           <div className="text-[10px] font-bold uppercase tracking-wider text-faint">High / Critical Risk</div>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="font-mono text-xl font-bold text-[#ff5860]">
-              {criticalCount + highCount}
+              {summary.highCriticalRiskCount}
             </span>
-            <span className="text-[11px] text-mute">({criticalCount} critical)</span>
+            <span className="text-[11px] text-mute">({summary.criticalRiskCount} critical)</span>
           </div>
         </div>
       </div>
