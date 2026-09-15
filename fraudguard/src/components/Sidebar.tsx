@@ -9,7 +9,6 @@ import {
   Gavel,
   BarChart3,
   ShieldCheck,
-  Activity,
   ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -25,7 +24,40 @@ const NAV = [
   { to: '/reports', label: 'Reports', icon: BarChart3 },
 ];
 
+// Turns 'district_officer' -> 'District Officer', 'mp_office' -> 'MP Office', etc.
+function formatRole(role?: string): string {
+  if (!role) return 'Officer';
+  if (role === 'mp_office') return 'MP Office';
+  return role
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function getActiveUser() {
+  const stored = localStorage.getItem('fg_user');
+  if (!stored) return { name: 'Officer', role: 'admin', region: null };
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return { name: 'Officer', role: 'admin', region: null };
+  }
+}
+
 export default function Sidebar({ collapsed }: { collapsed: boolean }) {
+  // FIXED: previously hardcoded "A. Sharma / Monitoring Officer · NDC"
+  // for every single user regardless of who actually logged in. Now
+  // reads the real profile that Login.tsx already stores in
+  // localStorage after a successful Supabase sign-in.
+  const user = getActiveUser();
+  const region = user.constituency || user.district || user.state || null;
+
   return (
     <aside className="flex h-full w-[236px] shrink-0 flex-col border-r border-edge bg-surface/70 backdrop-blur-md">
       <div className="flex items-center gap-2.5 px-5 py-6">
@@ -66,37 +98,18 @@ export default function Sidebar({ collapsed }: { collapsed: boolean }) {
         ))}
       </nav>
 
-      <div className="space-y-3 px-3 pb-5">
-        <div className="rounded-xl border border-edge bg-white/[0.02] p-3">
-          <div className="flex items-center gap-2">
-            <Activity className="h-3.5 w-3.5 text-[#48d29b]" />
-            <span className="text-[11px] font-semibold text-ink">System Status</span>
-            <span className="ml-auto flex items-center gap-1 text-[10px] text-[#48d29b]">
-              <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-[#48d29b]" /> LIVE
-            </span>
-          </div>
-          <div className="mt-2.5 grid grid-cols-2 gap-2 text-[10px]">
-            {[
-              ['AI Engine', 'Operational'],
-              ['Verification', 'Online'],
-              ['Sync', '6 min ago'],
-              ['Uptime', '99.9%'],
-            ].map(([k, v]) => (
-              <div key={k} className="flex flex-col gap-0.5">
-                <span className="text-faint">{k}</span>
-                <span className="font-semibold text-mute">{v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
+      {/* System Status block removed per request — the "AI Engine /
+          Verification / Sync / Uptime" panel that used to sit here is gone. */}
+      <div className="px-3 pb-5">
         <div className="flex items-center gap-3 rounded-xl border border-edge bg-white/[0.02] p-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-brand to-[#1a3fae] text-xs font-bold text-white">
-            AS
+            {getInitials(user.name || 'Officer')}
           </div>
           <div className="min-w-0 leading-tight">
-            <div className="truncate text-[12px] font-semibold text-ink">A. Sharma</div>
-            <div className="truncate text-[10px] text-faint">Monitoring Officer · NDC</div>
+            <div className="truncate text-[12px] font-semibold text-ink">{user.name}</div>
+            <div className="truncate text-[10px] text-faint">
+              {formatRole(user.role)}{region ? ` · ${region}` : ''}
+            </div>
           </div>
         </div>
       </div>
